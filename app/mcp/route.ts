@@ -1,82 +1,146 @@
-import { baseURL } from "@/baseUrl";
 import { createMcpHandler } from "mcp-handler";
+import { logMcpHandlerEvent, logMcpResponse } from "@/src/mcp/observability";
 import {
-  registerAppTool,
-  registerAppResource,
-  RESOURCE_MIME_TYPE,
-} from "@modelcontextprotocol/ext-apps/server";
-import { z } from "zod";
+  registerPlugin,
+  SERVER_NAME,
+  SERVER_VERSION,
+} from "@/src/mcp/server";
 
-const UI_VERSION = "2026-02-10-21";
-const RESOURCE_URI = `ui://app/index.html?v=${UI_VERSION}`;
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
-// ---------------------------------------------------------------------------
-// Self-fetch: grab the rendered Next.js page to use as the widget HTML.
-// ---------------------------------------------------------------------------
-async function fetchPageHtml(path: string): Promise<string> {
-  const res = await fetch(`${baseURL}${path}`);
-  return res.text();
-}
+const MAX_PAYLOAD_BYTES = 64 * 1024;
+const HANDLER_TIMEOUT_MS = 25_000;
+const ALLOWED_METHODS = new Set(["GET", "POST", "DELETE"]);
 
-// ---------------------------------------------------------------------------
-// MCP handler
-// ---------------------------------------------------------------------------
-const handler = createMcpHandler(async (server) => {
-  registerAppResource(
-    server,
-    "app-widget",
-    RESOURCE_URI,
-    { mimeType: RESOURCE_MIME_TYPE },
-    async () => {
-      const html = await fetchPageHtml("/");
-      return {
-        contents: [
-          {
-            uri: RESOURCE_URI,
-            mimeType: RESOURCE_MIME_TYPE,
-            text: html,
-            _meta: {
-              ui: {
-                csp: {
-                  connectDomains: [baseURL],
-                  resourceDomains: [baseURL],
-                },
-              },
-            },
-          },
-        ],
-      };
-    },
-  );
-
-  registerAppTool(
-    server,
-    "greet",
-    {
-      title: "Greet",
-      description: "Display a personalised greeting in the widget.",
-      inputSchema: {
-        name: z.string().describe("Name of the person to greet"),
-      },
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        openWorldHint: false,
-      },
-      _meta: {
-        ui: { resourceUri: RESOURCE_URI },
-      },
-    },
-    async ({ name }) => ({
-      content: [{ type: "text" as const, text: `Hello, ${name}!` }],
-      structuredContent: {
-        name,
-        greeting: `Hello, ${name}!`,
-        timestamp: new Date().toISOString(),
-      },
-    }),
-  );
+const rawHandler = createMcpHandler(registerPlugin, {
+  serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
+  instructions:
+    "This server exposes one read-only greeting display tool. Use show_greeting only when the user explicitly requests a personalized greeting.",
+  onEvent: logMcpHandlerEvent,
 });
 
-export const GET = handler;
-export const POST = handler;
+function mcpError(status: number, code: number, message: string): Response {
+  return new Response(
+    JSON.stringify({ jsonrpc: "2.0", error: { code, message }, id: null }),
+    {
+      status,
+      headers: {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json; charset=utf-8",
+      },
+    },
+  );
+}
+
+async function isPayloadWithinLimit(request: Request): Promise<boolean> {
+  const header = request.headers.get("content-length");
+  const declaredLength = header ? Number(header) : undefined;
+
+  if (declaredLength !== undefined && (!Number.isFinite(declaredLength) || declaredLength < 0)) {
+    return false;
+  }
+  if (declaredLength !== undefined && declaredLength > MAX_PAYLOAD_BYTES) {
+    return false;
+  }
+
+  // A proxy may omit Content-Length. Checking a clone keeps the original body
+  // available to the MCP handler while still applying a deterministic limit.
+  if (declaredLength === undefined) {
+    const bytes = await request.clone().arrayBuffer();
+    return bytes.byteLength <= MAX_PAYLOAD_BYTES;
+  }
+
+  return true;
+}
+
+async function runWithTimeout(request: Request): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      resolve(mcpError(504, -32603, "MCP request timed out."));
+    }, HANDLER_TIMEOUT_MS);
+
+    rawHandler(request).then(
+      (response) => {
+        clearTimeout(timeout);
+        resolve(response);
+      },
+      (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function handleMcpRequest(request: Request): Promise<Response> {
+  const startedAt = performance.now();
+
+  if (!ALLOWED_METHODS.has(request.method)) {
+    const response = new Response(null, {
+      status: 405,
+      headers: { Allow: "GET, POST, DELETE" },
+    });
+    logMcpResponse({
+      method: request.method,
+      status: response.status,
+      outcome: "rejected",
+      durationMs: Math.round(performance.now() - startedAt),
+    });
+    return response;
+  }
+
+  if (request.method === "POST") {
+    const contentType = request.headers.get("content-type") ?? "";
+    if (!contentType.toLowerCase().startsWith("application/json")) {
+      const response = mcpError(415, -32600, "MCP requests must use application/json.");
+      logMcpResponse({
+        method: request.method,
+        status: response.status,
+        outcome: "rejected",
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+      return response;
+    }
+
+    if (!(await isPayloadWithinLimit(request))) {
+      const response = mcpError(413, -32600, "MCP request exceeds the payload limit.");
+      logMcpResponse({
+        method: request.method,
+        status: response.status,
+        outcome: "rejected",
+        durationMs: Math.round(performance.now() - startedAt),
+      });
+      return response;
+    }
+  }
+
+  try {
+    const response = await runWithTimeout(request);
+    logMcpResponse({
+      method: request.method,
+      status: response.status,
+      outcome:
+        response.status === 504
+          ? "timeout"
+          : response.ok
+            ? "success"
+            : "rejected",
+      durationMs: Math.round(performance.now() - startedAt),
+    });
+    return response;
+  } catch (error) {
+    const response = mcpError(500, -32603, "Internal MCP server error.");
+    logMcpResponse({
+      method: request.method,
+      status: response.status,
+      outcome: "error",
+      durationMs: Math.round(performance.now() - startedAt),
+      errorType: error instanceof Error ? error.name : "unknown_error",
+    });
+    return response;
+  }
+}
+
+export { handleMcpRequest as GET, handleMcpRequest as POST, handleMcpRequest as DELETE };

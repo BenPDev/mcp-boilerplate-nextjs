@@ -1,87 +1,105 @@
-# MCP Apps — Minimal Next.js Starter
+# MCP + Next.js production starter
 
-A minimal [Next.js](https://nextjs.org) starter for building [MCP Apps](https://modelcontextprotocol.io) — interactive UIs that MCP hosts render alongside tool calls.
+This is a reusable base for a public MCP server with a React widget rendered
+inside ChatGPT. It is intentionally **not** a submission-ready product: the
+only capability is `show_greeting`, a read-only technical demonstration. Replace
+that tool, public-policy content, and submission tests with the real use case
+before publishing.
 
-## How it works
+## Architecture
 
-The Next.js app serves two roles:
+- `app/mcp/route.ts` exposes the public stateless MCP endpoint using
+  `mcp-handler` v2 and `@modelcontextprotocol/server` v2.
+- `web/` holds the independent React widget. Vite plus
+  `vite-plugin-singlefile` produces one fully inline HTML file at
+  `web/dist/index.html` before the Next.js build.
+- `src/mcp/server.ts` declares the versioned UI resource
+  `ui://mcp-nextjs-starter/greeting/v1.html`, the tool output schema,
+  read-only annotations, no-auth compatibility metadata, UI metadata, and CSP.
+- The public Next.js pages are a diagnostic and policy site only. They are not
+  self-fetched and they contain no iframe/history/fetch patches.
 
-1. **MCP server** (`app/mcp/route.ts`) — registers tools and resources via [`mcp-handler`](https://github.com/vercel/mcp-handler) and [`@modelcontextprotocol/ext-apps`](https://github.com/anthropics/ext-apps).
-2. **Widget UI** (`app/page.tsx`) — a React page that MCP hosts render inside a sandboxed iframe. The MCP route self-fetches the rendered page HTML and serves it as an MCP resource.
+## Requirements
 
-The `useMcpApp` hook (`app/hooks/use-mcp-app.ts`) connects to the host via the `App` class from `@modelcontextprotocol/ext-apps` and provides tool input/result data as React state.
+- Node.js 22 LTS (`.nvmrc`)
+- Corepack and pnpm 10.29.3
 
-## Getting started
+The repository uses pnpm's strict dependency build policy. Only reviewed
+native builds (`sharp` and `unrs-resolver`) are allowed in
+`pnpm-workspace.yaml`; a newly introduced lifecycle script fails installation
+until explicitly reviewed.
 
-```bash
-pnpm install
-```
-
-### Local development with a tunnel
-
-MCP Apps need a public HTTPS URL. Use [ngrok](https://ngrok.com) (or any tunnel):
-
-```bash
-ngrok http 3000
-```
-
-Copy the HTTPS URL and set it in `.env`:
-
-```
-BASE_URL=https://xxxx-xxx-xxx.ngrok-free.app
-```
-
-Then start the dev server:
+## Configure and run
 
 ```bash
+corepack enable
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-### Connect to a host
+Copy `.env.example` to a local `.env.local` when testing a tunnel or production
+deployment. `PLUGIN_ORIGIN` must be an HTTPS origin with no path, query,
+fragment, or credentials. Production builds deliberately fail without it:
 
-Add your MCP server URL to any MCP host that supports Apps:
-
-```
-https://xxxx-xxx-xxx.ngrok-free.app/mcp
-```
-
-For example, in ChatGPT, Cursor, or Claude.ai: Settings > Apps > add the URL above.
-
-## Project structure
-
-```
-app/
-  page.tsx              — Homepage (widget UI)
-  about/page.tsx        — Example sub-page (navigation demo)
-  counter/page.tsx      — Example sub-page (interactivity demo)
-  mcp/route.ts          — MCP server endpoint
-  hooks/use-mcp-app.ts  — React hook for the MCP Apps bridge
-  layout.tsx            — Root layout with iframe bootstrap patches
-baseUrl.ts              — Public URL resolver (tunnel / Vercel)
-middleware.ts           — CORS headers for cross-origin iframe access
-next.config.ts          — assetPrefix for iframe asset loading
+```bash
+PLUGIN_ORIGIN=https://plugin.example.com pnpm build
+pnpm start
 ```
 
-## Key files
+In PowerShell, set it for the current shell instead:
 
-- **`app/mcp/route.ts`** — Define your tools and resources here. The `greet` tool is a minimal example.
-- **`app/page.tsx`** — Your widget UI. Edit this like any Next.js page. It receives tool data via `useMcpApp()`.
-- **`app/hooks/use-mcp-app.ts`** — Singleton `App` bridge with `sessionStorage` persistence. Provides `toolInput`, `toolResult`, and `connected` state.
-
-## Deploy
-
-Deploy to [Vercel](https://vercel.com/new) — no additional configuration needed. The `BASE_URL` is automatically derived from Vercel's environment variables in production.
-
-Once deployed, connect it to any MCP host using:
-
-```
-https://your-app.vercel.app/mcp
+```powershell
+$env:PLUGIN_ORIGIN = "https://plugin.example.com"
+pnpm build
+pnpm start
 ```
 
-For example, in ChatGPT, Cursor, or Claude.ai: Settings > Apps > add the URL above as a connector.
+The public routes are:
 
-## Learn more
+- `POST /mcp` — MCP endpoint. `GET` and `DELETE` currently return `405` because
+  this deployment is stateless and does not expose session streaming or
+  termination routes.
+- `GET /healthz` — no-store health response.
+- `GET /.well-known/openai-apps-challenge` — returns only the configured domain
+  verification token; otherwise 404.
+- `/support`, `/privacy`, `/terms` — starter content that must be replaced for
+  a real product.
 
-- [MCP Apps specification](https://modelcontextprotocol.io)
-- [@modelcontextprotocol/ext-apps](https://github.com/anthropics/ext-apps)
-- [mcp-handler](https://github.com/vercel/mcp-handler)
+## Quality gate
+
+```bash
+pnpm check
+PLUGIN_ORIGIN=https://plugin.example.test pnpm build
+pnpm audit --prod --audit-level=high
+```
+
+`pnpm test` exercises the MCP initialize/list/read/call flows as well as valid,
+invalid, and unknown-tool requests. It also checks the single-file widget,
+resource MIME type, output schema, annotations, CSP/domain metadata, and the
+absence of `https://undefined`.
+
+For manual protocol debugging run `pnpm inspect`, connect it to
+`http://localhost:3000/mcp`, then repeat against the HTTPS preview deployment.
+For the final host check, connect the stable HTTPS endpoint in ChatGPT Developer
+Mode and exercise the UI bridge, themes, locale, responsiveness, invalid input,
+retries, and out-of-scope prompts.
+
+## Deploy to Vercel
+
+Set `PLUGIN_ORIGIN` for every production build to the stable custom-domain
+origin. Do not use a Vercel preview URL as the permanent widget domain. The
+Next configuration includes `web/dist/**` in the `/mcp` function trace so the
+widget file exists at runtime.
+
+Provider-side security, alerting, and rollback tasks are documented in
+[docs/operations.md](docs/operations.md). In particular, configure Vercel WAF
+and rate limiting for `/mcp`, alert on initialization/tool failures, and retain
+the previous deployment for immediate promotion-based rollback.
+
+## OpenAI submission
+
+Follow the current OpenAI MCP, ChatGPT UI, reference, and submission guidance.
+Do not create or submit `chatgpt-app-submission.json` for this generic demo.
+Once the real product replaces `show_greeting`, add exactly five positive and
+three negative evaluation cases, justify every annotation, verify the domain,
+and ensure support/privacy/terms accurately reflect the deployed service.
