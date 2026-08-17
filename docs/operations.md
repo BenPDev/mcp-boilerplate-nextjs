@@ -5,8 +5,9 @@ must be configured in the target project before release.
 
 ## Required Vercel configuration
 
-1. Attach a stable custom HTTPS domain and set `PLUGIN_ORIGIN` to its origin.
-   Use the same origin on production and never infer it from preview variables.
+1. Set `PLUGIN_ORIGIN` to the stable HTTPS origin used in production. This may
+   be the project's fixed `*.vercel.app` domain or a custom domain; do not use
+   a preview URL or infer the value from preview variables.
 2. Set `OPENAI_APPS_CHALLENGE_TOKEN` only while domain verification is in
    progress. Verify `/.well-known/openai-apps-challenge` returns exactly the
    supplied token and nothing else.

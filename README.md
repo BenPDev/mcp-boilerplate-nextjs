@@ -86,8 +86,9 @@ retries, and out-of-scope prompts.
 
 ## Deploy to Vercel
 
-Set `PLUGIN_ORIGIN` for every production build to the stable custom-domain
-origin. Do not use a Vercel preview URL as the permanent widget domain. The
+Set `PLUGIN_ORIGIN` for every production build to the stable origin: either the
+project's fixed `*.vercel.app` domain or a custom domain. Do not use a Vercel
+preview URL as the permanent widget domain. The
 Next configuration includes `web/dist/**` in the `/mcp` function trace so the
 widget file exists at runtime.
 
