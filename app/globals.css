@@ -1,26 +1,86 @@
-@import "tailwindcss";
-
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light dark;
+  font-family: Arial, Helvetica, sans-serif;
+  background: #f8fafc;
+  color: #172033;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  box-sizing: border-box;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  min-width: 320px;
+}
+
+a {
+  color: inherit;
+}
+
+code {
+  border-radius: 0.25rem;
+  background: #e7edf6;
+  padding: 0.1rem 0.25rem;
+}
+
+.site-shell {
+  width: min(100% - 2rem, 62rem);
+  margin: 0 auto;
+  padding: 4rem 0;
+}
+
+.hero,
+.card-grid article {
+  border: 1px solid #d8e0eb;
+  border-radius: 1rem;
+  background: #fff;
+  padding: 2rem;
+}
+
+.hero h1 {
+  margin: 0.25rem 0 1rem;
+  font-size: clamp(2rem, 6vw, 3.5rem);
+}
+
+.hero p {
+  max-width: 44rem;
+  line-height: 1.6;
+}
+
+.eyebrow {
+  color: #4962a6;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.actions,
+.card-grid,
+.card-grid nav {
+  display: flex;
+  gap: 1rem;
+}
+
+.actions a,
+.card-grid a {
+  font-weight: 700;
+}
+
+.card-grid {
+  margin-top: 1rem;
+}
+
+.card-grid article {
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .site-shell {
+    padding: 1rem 0 2rem;
+  }
+
+  .card-grid {
+    flex-direction: column;
+  }
 }

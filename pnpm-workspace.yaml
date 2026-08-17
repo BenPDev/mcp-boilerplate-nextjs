@@ -1,0 +1,8 @@
+packages:
+  - "."
+
+# pnpm 10 blocks dependency lifecycle scripts unless they are reviewed here.
+strictDepBuilds: true
+allowBuilds:
+  "sharp@0.35.3": true
+  "unrs-resolver@1.11.1": true
