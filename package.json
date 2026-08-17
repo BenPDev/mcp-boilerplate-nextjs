@@ -9,7 +9,8 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "esbuild"
+      "esbuild",
+      "unrs-resolver"
     ],
     "overrides": {
       "@hono/node-server": "1.19.10",
